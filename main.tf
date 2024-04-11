@@ -53,7 +53,3 @@ resource "google_compute_firewall" "ssh" {
   }
   source_ranges = ["0.0.0.0/0"]
 }
-
-# locals {
-#   my_public_ip = "35.146.200.1/32"
-# }
