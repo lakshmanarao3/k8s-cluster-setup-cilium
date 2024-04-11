@@ -7,7 +7,7 @@ terraform {
   }
 }
 provider "google" {
-  project = "k8s-practice-v1"
+  project = ""
   region  = "us-central1"
 }
 
