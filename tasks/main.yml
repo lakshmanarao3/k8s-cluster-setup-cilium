@@ -1,0 +1,157 @@
+- name: Disable swap
+  command: swapoff -a
+  become: true
+
+- name: Create .conf file to load modules at bootup
+  copy:
+    content: |
+      overlay
+      br_netfilter
+    dest: /etc/modules-load.d/k8s.conf
+  become: true
+
+- name: Load modules
+  command: modprobe {{item}}
+  loop:
+    - overlay
+    - br_netfilter
+  become: true
+
+- name: set sysctl parameters
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: yes
+    state: present
+  loop:
+    - { name: "net.bridge.bridge-nf-call-iptables", value: "1" }
+    - { name: "net.bridge.bridge-nf-call-ip6tables", value: "1" }
+    - { name: "net.ipv4.ip_forward", value: "1" }
+  become: true
+
+- name: Install required packages
+  apt:
+    name: "{{ item }}"
+    update_cache: yes
+  loop:
+    - software-properties-common
+    - curl
+    - apt-transport-https
+    - ca-certificates
+    - gnupg
+  become: true
+
+- name: Add CRIO repository
+  shell: |
+    sudo mkdir -p /etc/apt/keyrings/
+    sudo curl -fsSL https://pkgs.k8s.io/addons:/cri-o:/prerelease:/main/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/cri-o-apt-keyring.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/cri-o-apt-keyring.gpg] https://pkgs.k8s.io/addons:/cri-o:/prerelease:/main/deb/ /" | sudo tee /etc/apt/sources.list.d/cri-o.list     
+    sudo apt-get update -y
+  become: true
+
+- name: Install CRIO
+  apt:
+    name: cri-o
+    state: latest
+  become: true
+
+- name: Start and enable CRIO
+  service:
+    name: crio
+    enabled: yes
+    state: started
+  become: true
+
+- name: Add Kubernetes APT repository and key
+  shell: |
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list       
+    sudo apt-get update -y
+  become: true
+
+- name: Install Kubernetes packages
+  apt:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - kubelet={{ kube_version }}-*
+    - kubectl={{ kube_version }}-*
+    - kubeadm={{ kube_version }}-*
+  become: true
+
+- name: Enable and start kubelet service
+  service:
+    name: kubelet
+    enabled: yes
+    state: started
+  become: true
+
+- name: Reset Kubernetes pre-flight checks
+  command: kubeadm reset pre-flight checks --force
+  become: true
+
+- name: Pull Kubernetes images
+  command: kubeadm config images pull
+  become: true
+
+- name: Initialize Kubernetes master node
+  command: kubeadm init --pod-network-cidr="192.168.0.0/16"
+  when: inventory_hostname == "masternode"
+  become: true
+
+- name: Ensure .kube directory exists.
+  file:
+    path: "{{ ansible_user_dir }}/.kube"
+    state: directory
+    mode: 0755
+    owner: "{{ansible_user}}"
+    group: "{{ansible_user}}"
+  when: inventory_hostname == "masternode"
+
+- name: Symlink the kubectl admin.conf to ~/.kube/config.
+  file:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ ansible_user_dir }}/.kube/config"
+    state: link
+    mode: 0644
+  when: inventory_hostname == "masternode"
+  become: true
+
+- name: Download Calico operator manifest
+  get_url:
+    url: https://raw.githubusercontent.com/projectcalico/calico/v3.27.3/manifests/tigera-operator.yaml
+    dest: /tmp/tigera-operator.yaml
+  when: inventory_hostname == "masternode"
+
+- name: Install Calico operator
+  command: kubectl create -f /tmp/tigera-operator.yaml
+  when: inventory_hostname == "masternode"
+
+- name: Download Calico custom resource manifest
+  get_url:
+    url: https://raw.githubusercontent.com/projectcalico/calico/v3.27.3/manifests/custom-resources.yaml
+    dest: /tmp/custom-resources.yaml
+  when: inventory_hostname == "masternode"
+
+- name: Install Calico custom resources
+  command: kubectl create -f /tmp/custom-resources.yaml
+  when: inventory_hostname == "masternode"
+
+- name: Get join command
+  shell: kubeadm token create --print-join-command
+  register: join_command_raw
+  when: inventory_hostname == "masternode"
+
+- name: Set join command
+  set_fact:
+    join_command: "{{ join_command_raw.stdout_lines[0] }}"
+  when: inventory_hostname == "masternode"
+
+- name: Join cluster
+  shell: "{{ hostvars['masternode'].join_command }} >> node_joined.txt"
+  args:
+    chdir: "{{ ansible_env.HOME }}"
+  register: join_result
+  changed_when: join_result.stdout.find('This node has joined the cluster') != -1
+  when: inventory_hostname in groups["workernodes"]
+  become: true
