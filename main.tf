@@ -7,8 +7,8 @@ terraform {
   }
 }
 provider "google" {
-  project = ""
-  region  = "us-central1"
+  project = var.project_id
+  region  = var.region
 }
 
 resource "google_compute_network" "demo-vpc" {
@@ -16,16 +16,9 @@ resource "google_compute_network" "demo-vpc" {
   auto_create_subnetworks = false
 }
 
-resource "google_compute_subnetwork" "subnet-worker" {
-  name          = "subnet-workernode"
-  ip_cidr_range = "10.0.1.0/24"
-  network       = google_compute_network.demo-vpc.self_link
-}
-
-resource "google_compute_subnetwork" "subnet-master" {
-  name = "subnet-masternode"
-  region = "us-west1"
-  ip_cidr_range = "10.0.2.0/24"
+resource "google_compute_subnetwork" "k8s-infra" {
+  name = "subnet-k8s-infra"
+  ip_cidr_range = "172.16.0.0/24"
   network = google_compute_network.demo-vpc.self_link
 }
 
@@ -35,10 +28,11 @@ resource "google_compute_firewall" "demo-firewall" {
   allow {
     protocol = "icmp"
   }
+
   allow {
     protocol = "tcp"
-    ports = ["80", "443", "8080", "9090", "3000", "9100", "8000", "8001", "9000", "2379", "2380", "6443", "10250",
-    "10251", "10252", "10255"]
+    ports = ["80", "443", "8080", "9090", "3000-32767", "9100", "8000", "8001","8443", "9000", "2379", "2380", "6443", "10250",
+    "10259","10257"]
   }
   source_ranges = ["0.0.0.0/0"]
 }

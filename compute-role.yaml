@@ -1,0 +1,24 @@
+title: compute-engine role
+description: Grants permissions to compute resources.
+stage: ALPHA
+includedPermissions:
+- compute.addresses.create
+- compute.addresses.delete
+- compute.addresses.get
+- compute.addresses.list
+- compute.instances.create
+- compute.instances.delete
+- compute.instances.get
+- compute.instances.list
+- compute.networks.create
+- compute.networks.delete
+- compute.networks.get
+- compute.networks.list
+- compute.subnetworks.create
+- compute.subnetworks.delete
+- compute.subnetworks.get
+- compute.subnetworks.list
+- compute.firewalls.create
+- compute.firewalls.delete
+- compute.firewalls.get
+- compute.firewalls.list
